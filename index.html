@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirmar Pago Premium</title>
+    <!-- 1. Scripts de TON Connect y Telegram -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <style>
+        /* Estilos para que se vea bien en Telegram */
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+        :root {
+            --tg-theme-bg-color: #ffffff;
+            --tg-theme-text-color: #000000;
+            --tg-theme-button-color: #2481cc;
+            --tg-theme-button-text-color: #ffffff;
+        }
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .container {
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        p {
+            font-size: 16px;
+            margin-bottom: 25px;
+        }
+        .price {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 30px;
+        }
+        #pay-button {
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            font-weight: 500;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            background-color: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            display: none; /* Oculto hasta que se conecte la wallet */
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+        /* Estilos del botón de TON Connect */
+        #ton-connect-button {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Activar Plan Premium</h1>
+        <p>Conecta tu wallet para confirmar el pago.</p>
+        <div class="price" id="payment-amount">Cargando...</div>
+        
+        <!-- 2. Botón para pagar (inicialmente oculto) -->
+        <button id="pay-button">Pagar Ahora</button>
+        
+        <!-- 3. Contenedor para el botón de TON Connect -->
+        <div id="ton-connect-button"></div>
+        
+        <p id="status"></p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Inicializar la App de Telegram
+            const tg = window.Telegram.WebApp;
+            tg.ready();
+            tg.expand(); // Expandir la Mini App a pantalla completa
+
+            const statusEl = document.getElementById('status');
+            const payButton = document.getElementById('pay-button');
+            const amountEl = document.getElementById('payment-amount');
+
+            // --- Lógica de TON Connect ---
+
+            // 4. Inicializar la UI de TON Connect
+            const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+                manifestUrl: 'https://<TU_USUARIO_GH>.github.io/<TU_REPO>/tonconnect-manifest.json', // URL a tu manifest (ver Paso 2)
+                buttonRootId: 'ton-connect-button'
+            });
+
+            // 5. Leer los parámetros de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const toWallet = urlParams.get('to');
+            const amountNano = urlParams.get('amount'); // El monto ya viene en nanoTONs
+            const paymentCode = urlParams.get('memo');
+            const amountTON = Number(amountNano) / 1000000000;
+
+            if (!toWallet || !amountNano || !paymentCode) {
+                amountEl.textContent = 'Error';
+                statusEl.textContent = 'Faltan parámetros de pago. Por favor, intenta de nuevo desde el bot.';
+                return;
+            }
+            
+            amountEl.textContent = `${amountTON} TON`;
+
+            // 6. Monitorear el estado de la conexión
+            tonConnectUI.onStatusChange(wallet => {
+                if (wallet) {
+                    // Si hay una wallet conectada, mostrar el botón de pagar
+                    payButton.style.display = 'block';
+                    statusEl.textContent = 'Wallet conectada. ¡Listo para pagar!';
+                } else {
+                    // Si no, ocultarlo
+                    payButton.style.display = 'none';
+                }
+            });
+
+            // 7. Lógica del botón de pago
+            payButton.addEventListener('click', async () => {
+                const transaction = {
+                    validUntil: Math.floor(Date.now() / 1000) + 600, // 10 minutos de validez
+                    messages: [
+                        {
+                            address: toWallet,
+                            amount: amountNano,
+                            payload: btoa(paymentCode) // El comentario/memo debe ir en base64
+                        }
+                    ]
+                };
+
+                try {
+                    statusEl.textContent = 'Enviando transacción... Por favor, confirma en tu wallet.';
+                    const result = await tonConnectUI.sendTransaction(transaction);
+                    
+                    statusEl.textContent = '¡Pago exitoso! La ventana se cerrará en 3 segundos.';
+                    
+                    // Notificar al bot que el pago fue exitoso (opcional pero recomendado)
+                    tg.sendData(JSON.stringify({ status: 'success', txHash: result.boc }));
+
+                    setTimeout(() => {
+                        tg.close(); // Cerrar la Mini App
+                    }, 3000);
+
+                } catch (error) {
+                    statusEl.textContent = 'El pago fue cancelado o falló. Inténtalo de nuevo.';
+                    console.error('Error al enviar la transacción:', error);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
